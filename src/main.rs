@@ -6,6 +6,7 @@ use sdl2::render::{WindowCanvas, Texture};
 use sdl2::rect::{Point, Rect};
 use std::time::Duration;
 
+#[derive(Debug)]
 struct Position {
     x: i32,
     y: i32,
@@ -17,6 +18,11 @@ impl Position {
     }
 }
 
+struct Size {
+    width: u32,
+    height: u32,
+}
+
 enum EntityType {
     Turret,
     Conveyor,
@@ -25,6 +31,8 @@ enum EntityType {
 }
 
 struct Game {
+    screen_size: Size,
+    camera_position: Position,
     positions: Vec<Position>,
     entity_types: Vec<EntityType>,
 }
@@ -32,6 +40,8 @@ struct Game {
 impl Game {
     fn new() -> Game {
         Game {
+            screen_size: Size { width: 0, height: 0 },
+            camera_position: Position::new(0, 0),
             positions: Vec::new(),
             entity_types: Vec::new(),
         }
@@ -41,30 +51,49 @@ impl Game {
         self.positions.push(position);
         self.entity_types.push(entity_type);
     }
+
+    fn screen_to_world(&self, screen_position: &Position) -> Position {
+        let sx = screen_position.x;
+        let sy = screen_position.y;
+
+        Position {
+            // lb - left bottom ;; c - camera ;; w - screen width ;; h - screen height ;; wo - world
+            // lbx = cx - w/2
+            // wox = lbx + sx
+            x: self.camera_position.x - (self.screen_size.width as i32 / 2) + sx,
+            // lby = cy - h/2
+            // h - sy -> on screen, higher pixel has lower y.
+            // woy = lby + (h - sy) = cy + h/2 - sy 
+            y: self.camera_position.y + (self.screen_size.height as i32 / 2) + sy,
+        }
+    }
+
+    fn world_to_screen(&self, world_position: &Position) -> Position {
+        let wx = world_position.x;
+        let wy = world_position.y;
+
+        Position {
+            x: wx - self.camera_position.x + (self.screen_size.width as i32 / 2),
+            y: wy - self.camera_position.y - (self.screen_size.height as i32 / 2),
+        }
+    }
 }
 
 fn render(canvas: &mut WindowCanvas, texture: &Texture, game: &Game) -> Result<(), String> {
     canvas.set_draw_color(Color::RGB(0, 255, 255));
     canvas.clear();
 
-    // let (width, height) = canvas.output_size()?;
-
     for i in 0..game.positions.len() {
         let position = &game.positions[i];
         let entity_type = &game.entity_types[i];
 
-        let screen_position = Point::new(position.x, position.y);
+        let screen_position = game.world_to_screen(position);
+        let screen_position = Point::new(screen_position.x, screen_position.y);
         let screen_rect = Rect::from_center(screen_position, 32, 32);
         let sprite = Rect::new(0, 0, 32, 32);
 
         canvas.copy(texture, sprite, screen_rect)?;
     }
-
-    // let screen_position = Point::new(width as i32 / 2, height as i32 / 2);
-    // let screen_rect = Rect::from_center(screen_position, 32, 32);
-
-    // let sprite = Rect::new(0, 0, 32, 32);
-    // canvas.copy(texture, sprite, screen_rect)?;
 
     canvas.present();
 
@@ -89,6 +118,9 @@ fn main() -> Result<(), String> {
 
     let mut game = Game::new();
 
+    let (width, height) = canvas.output_size()?;
+    game.screen_size = Size { width, height, };
+
     let mut event_pump = sdl_context.event_pump()?;
     'running: loop {
         for event in event_pump.poll_iter() {
@@ -100,7 +132,9 @@ fn main() -> Result<(), String> {
                 Event::MouseButtonDown { x, y, mouse_btn, .. } => {
                     println!("Mouse x: {}, y: {} mouse_btn: {:?}", x, y, mouse_btn);
 
-                    game.add_entity(Position::new(x, y), EntityType::Turret);
+                    let world_position = game.screen_to_world(&Position::new(x, y));
+
+                    game.add_entity(world_position, EntityType::Turret);
                 },
                 _ => {}
             }
